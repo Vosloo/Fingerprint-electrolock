@@ -1,0 +1,29 @@
+{
+    "configurations": [
+        {
+            "name": "Win32",
+            "includePath": [
+                "C:\\Users\\Marek\\Documents\\Arduino\\libraries\\Adafruit_Fingerprint_Sensor_Library",
+                "C:\\Users\\Marek\\Documents\\Arduino\\libraries\\LiquidCrystal_I2C",
+                "C:\\Users\\Marek\\Documents\\Arduino\\libraries\\Keypad\\src",
+                "D:\\Gry_i_programy\\Arduino\\tools\\**",
+                "D:\\Gry_i_programy\\Arduino\\hardware\\arduino\\avr\\**",
+                "D:\\Gry_i_programy\\Arduino\\hardware\\tools\\avr\\**",
+                "D:\\Gry_i_programy\\Arduino\\hardware\\tools\\avr\\lib\\gcc\\avr\\**",
+                "D:\\Gry_i_programy\\Arduino\\hardware\\tools\\avr\\avr\\include\\**",
+                "D:\\Gry_i_programy\\Arduino\\libraries\\**"
+            ],
+            "forcedInclude": [
+                "D:\\Gry_i_programy\\Arduino\\hardware\\arduino\\avr\\cores\\arduino\\Arduino.h"
+            ],
+            "intelliSenseMode": "gcc-x64",
+            "compilerPath": "D:\\Gry_i_programy\\Arduino\\hardware\\tools\\avr\bin\\avr-g++.exe",
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "defines": [
+                "USBCON"
+            ]
+        }
+    ],
+    "version": 4
+}
