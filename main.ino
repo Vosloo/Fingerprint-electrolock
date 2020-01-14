@@ -231,7 +231,7 @@ bool convertFingerprint(bool again=false){
   {
     status = finger.image2Tz(1);
   }
-  
+
   switch (status) 
   {
     case FINGERPRINT_OK:
@@ -314,6 +314,84 @@ bool scanFingerprint(bool again=false){
       return false;
     }
   }
+}
+
+bool searchFingerprint(){
+  int status = -1;
+  
+  while (status != FINGERPRINT_OK) 
+  {
+    status = finger.getImage();
+    
+    switch (status) 
+    {
+    case FINGERPRINT_OK:
+      lcd.clear();
+      lcd.print("Przetwarzanie");
+      break;
+    case FINGERPRINT_NOFINGER: // just wait
+      break;
+    case FINGERPRINT_PACKETRECIEVEERR:
+      lcd.clear();
+      lcd.print("Comm error!");
+      delay(4000);
+      return false;
+    case FINGERPRINT_IMAGEFAIL:
+      lcd.clear();
+      lcd.print("Ponow probe.");
+      delay(2000);
+      break;
+    default:
+      lcd.clear();
+      lcd.print("Unknown error!");
+      delay(4000);
+      return false;
+    }
+  }
+    
+  status = finger.image2Tz();
+  if (status != FINGERPRINT_OK)
+  {
+    return false;
+  }
+
+  status = finger.fingerFastSearch();
+  if (status == FINGERPRINT_OK) 
+  {
+    lcd.clear();
+    lcd.print("Dopasowano!");
+    delay(1000);
+    return true;
+  } 
+  else if (status == FINGERPRINT_PACKETRECIEVEERR) 
+  {
+    lcd.clear();
+    lcd.print("Comm error!");
+    delay(4000);
+    return false;
+  } 
+  else if (status == FINGERPRINT_NOTFOUND) 
+  {
+    lcd.clear();
+    lcd.print("Niedopasowano!");
+    delay(2500);
+    return false;
+  } 
+  else 
+  {
+    lcd.clear();
+    lcd.print("Unknown error!");
+    delay(4000);
+    return false;
+  }   
+}
+
+bool matchFingerprint(){
+  lcd.clear();
+  lcd.print("Przyloz palec");
+
+  bool success = searchFingerprint();
+  return success;
 }
 
 bool checkIfIDTaken(uint8_t id){
@@ -630,6 +708,15 @@ void loop(){
 
           case '3':
             emptyDatabase();
+            state = RELEASED;
+            break;
+
+          case '5':
+            if(state == PRESSED)
+            {
+              bool matched = matchFingerprint();
+              state = RELEASED;
+            }
             break;
 
           case '*':
