@@ -3,8 +3,12 @@
 #include <Key.h>
 #include <Keypad.h>
 #include <SoftwareSerial.h>
+#include <EEPROM.h>
 
 #define RELAY 10
+
+long PASSWORD;
+int PASSADDRESS = 0; 
 
 const byte ROWS = 4; 
 const byte COLS = 3; 
@@ -51,12 +55,14 @@ boolean backlightOn = false;
 String displayedMsg = "";
 long timeElapsed = -1;
 
+boolean passOk = false;
+
 String tmpString = "";
 boolean tmpFlag = false;
 
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
-SoftwareSerial mySerial(12, 13);
+SoftwareSerial mySerial(12, 13); //green, white
 
 Adafruit_Fingerprint finger = Adafruit_Fingerprint(&mySerial);
 
@@ -107,9 +113,9 @@ boolean screenActivated(){
 
 void emptyDatabase(){
   lcd.clear();
-  lcd.print("Do You want to");
+  lcd.print("Czy chcesz");
   lcd.setCursor(0, 1);
-  lcd.print("delete fingers?");
+  lcd.print("usunac odciski?");
   while(true)
   {
     char keyPressed = customKeypad.waitForKey();
@@ -120,15 +126,16 @@ void emptyDatabase(){
     if(keyPressed == '*')
     {
       lcd.clear();
-      lcd.print("Action aborted.");
+      lcd.print("Przerwano.");
       break;
     }
     else
     {
       lcd.clear();
       finger.emptyDatabase();
-      lcd.print("Database cleared");
-      delay(2000);
+      lcd.print("Usunieto");
+      lcd.setCursor(0, 1);
+      lcd.print("odciski!");
       break;
     }
   }
@@ -374,7 +381,6 @@ bool searchFingerprint(){
   {
     lcd.clear();
     lcd.print("Niedopasowano!");
-    delay(2500);
     return false;
   } 
   else 
@@ -401,7 +407,7 @@ bool checkIfIDTaken(uint8_t id){
   case FINGERPRINT_OK:
     return true;
   case FINGERPRINT_PACKETRECIEVEERR:
-    return true; // Should never occur
+    return false; // Should never occur
   default:
     return false;
   }
@@ -418,12 +424,12 @@ bool checkBoundaries(int number){
   }
 }
 
-int convertToInt(String number){
+int convertToIntLong(String number){
   int numInt = number.toInt();
   return numInt;
 }
 
-uint8_t getID() {
+uint8_t getID(bool deleteID=false) {
   uint8_t num = 0;
   String IDMessage = "(1-127) ID: ";
   String number = "";
@@ -438,7 +444,7 @@ uint8_t getID() {
     int numLength = number.length();
     if(keyPressed == '#') // Accepted ID
     {
-      int tempNumber = convertToInt(number);
+      int tempNumber = convertToIntLong(number);
       if(tempNumber == 0) // Couldnt convert
       {
         number = "";
@@ -457,20 +463,41 @@ uint8_t getID() {
       {
         num = (uint8_t)tempNumber;
         bool IDTaken = checkIfIDTaken(num);
-        if(IDTaken)
+        if(deleteID)
         {
-          number = "";
-          clearLine(1);
-          lcd.setCursor(0, 1);
-          lcd.print("ID zajete!");
-          delay(2500);
-          clearLine(1);
-          lcd.setCursor(0, 1);
-          lcd.print(IDMessage);
+          if(IDTaken)
+          {
+            return num;
+          }
+          else
+          {
+            number = "";
+            clearLine(1);
+            lcd.setCursor(0, 1);
+            lcd.print("Brak takiego ID");
+            delay(2500);
+            clearLine(1);
+            lcd.setCursor(0, 1);
+            lcd.print(IDMessage);
+          }
         }
         else
         {
-          return num;
+          if(IDTaken)
+          {
+            number = "";
+            clearLine(1);
+            lcd.setCursor(0, 1);
+            lcd.print("ID zajete!");
+            delay(2500);
+            clearLine(1);
+            lcd.setCursor(0, 1);
+            lcd.print(IDMessage);
+          }
+          else
+          {
+            return num;
+          }
         }
       }
       else
@@ -504,6 +531,56 @@ uint8_t getID() {
       lcd.print(keyPressed);
     }
   }
+}
+
+void deleteInDatabase(uint8_t ID){
+  uint8_t status = -1;
+  
+  status = finger.deleteModel(ID);
+
+  if (status == FINGERPRINT_OK) 
+  {
+    lcd.clear();
+    lcd.print("Usunieto odcisk");
+  } 
+  else if (status == FINGERPRINT_PACKETRECIEVEERR) 
+  {
+    lcd.clear();
+    lcd.print("Comm error!");
+    delay(4000);
+  } 
+  else if (status == FINGERPRINT_BADLOCATION) 
+  {
+    lcd.clear();
+    lcd.print("Bad storage");
+    lcd.setCursor(0, 1);
+    lcd.print("location!");
+    delay(4000);
+  } 
+  else if (status == FINGERPRINT_FLASHERR) 
+  {
+    lcd.clear();
+    lcd.print("Error writing");
+    lcd.setCursor(0, 1);
+    lcd.print("to flash!");
+    delay(4000);
+  } 
+  else 
+  {
+    lcd.clear();
+    lcd.print("Unknown error!");
+    delay(4000);
+  }   
+}
+
+void deleteID(){
+  uint8_t ID = getID(true);
+  if(ID == 255) // Error ID (aborted)
+  {
+    return;
+  }
+
+  deleteInDatabase(ID);
 }
 
 void addFingerprint(){
@@ -550,7 +627,7 @@ void clearLine(int lineNum){
   lcd.setCursor(0, 0);
 }
 
-void showLegend(){ // Make switching pages slicker;
+void showLegend(){
   lcd.clear();
   lcd.setCursor(0, 1);
   lcd.write(0);
@@ -613,12 +690,112 @@ void switchDisplayOff(){
   switchBacklight();
 }
 
+void openLock(){
+  digitalWrite(RELAY, LOW);
+  lcd.clear();
+  lcd.print("Otwarto zamek");
+  delay(3000);
+  digitalWrite(RELAY, HIGH);
+  lcd.clear();
+  lcd.print("Zamknieto zamek");
+}
+
+bool checkIfPassCorrect(long number){
+  if(((String)number).length() != 8)
+  {
+    return false;
+  }
+  if(PASSWORD != number)
+  {
+    return false;
+  }
+  return true;
+}
+
+void verifyPassword(){
+  String number = "";
+  lcd.clear();
+  lcd.print("Podaj aktualne");
+  lcd.setCursor(0, 1);
+  String passMessage = "haslo: ";
+  lcd.print(passMessage);
+
+  while (true)
+  {
+    char keyPressed = customKeypad.waitForKey();
+    int numLength = number.length();
+    if(keyPressed == '#') // Accepted ID
+    {
+      long tempNumber = convertToIntLong(number);
+      if(tempNumber == 0) // Couldnt convert
+      {
+        number = "";
+        clearLine(1);
+        lcd.setCursor(0, 1);
+        lcd.print("Not a number!");
+        delay(2500);
+        clearLine(1);
+        lcd.setCursor(0, 1);
+        lcd.print(passMessage);
+        continue;
+      }
+
+      bool success = checkIfPassCorrect(tempNumber);
+      if(success)
+      {
+        lcd.clear();
+        lcd.print("Zweryfikowano!");
+        passOk = true;
+        return;
+      }
+      else
+      {
+        lcd.clear();
+        lcd.print("Bledne haslo!");
+        return;
+      }
+    }
+    else if(keyPressed == '*' && numLength >= 1) // Delete one character
+    {
+      number.remove(numLength - 1);
+      clearLine(1);
+      lcd.setCursor(0, 1);
+      lcd.print(passMessage + number);
+    }
+    else if(keyPressed == '0' && number.length() == 0) // Exit 
+    {
+      lcd.clear();
+      lcd.print("Przerwano.");
+      return; // Max value for byte - error num as cannot be returned as ID;
+    }
+    else if(number.length() != 8)
+    {
+      number.concat(keyPressed);
+      lcd.print(keyPressed);
+    }
+  }
+}
+
+void changePassword(){ // TODO end pass changing;
+  verifyPassword();
+
+  if(passOk)
+  {
+    ;
+  }
+}
+
 void setup(){
   Serial.begin(9600);
   finger.begin(57600);
 
+  PASSWORD = EEPROM.read(PASSADDRESS); // reads password from eeprom;
+  if(PASSWORD == 255)
+  {
+    PASSWORD = 12345678; //default Password = 12345678
+  }
+  
   lcd.init();
-  lcd.begin(16, 2);
   lcd.createChar(0, arrowDown);
   lcd.createChar(1, arrowUp);
   lcd.clear();
@@ -650,15 +827,8 @@ void setup(){
   
 void loop(){
   String msg = "";
-
-  if(!backlightOn && screenActivated())
-  {
-    timeElapsed = millis();
-    switchBacklight();
-    delay(100);
-  }
   
-  if (backlightOn && customKeypad.getKeys())
+  if (customKeypad.getKeys())
   {
     for (int i = 0; i < LIST_MAX; i++)   // Scan the whole key list.
     {
@@ -676,62 +846,84 @@ void loop(){
             state = HOLD;
             break;
         }
-
-        switch (customKey)
+        
+        if(!backlightOn)
         {
-          case '0':
-            if(state == PRESSED)
-            {
-              lcd.clear();
-              lcd.print("Hold to see");
-              lcd.setCursor(0, 1);
-              lcd.print("action legend.");
-              break;
-            }
-            else if(state != HOLD)
-            {
-              break;
-            }
-            showLegend();
+          if(customKey == '*')
+          {
+            switchBacklight();
+            timeElapsed = millis();
             state = RELEASED;
-            break;
+          }
+        }
 
-          case '1':
-            addFingerprint();
-            state = RELEASED;
-            break;
-
-          case '2':
-            lcd.clear();
-            lcd.print("Delete finger.");
-            break;
-
-          case '3':
-            emptyDatabase();
-            state = RELEASED;
-            break;
-
-          case '5':
-            if(state == PRESSED)
-            {
-              bool matched = matchFingerprint();
+        if(backlightOn)
+        {
+          switch (customKey)
+          {
+            case '0':
+              if(state == PRESSED)
+              {
+                lcd.clear();
+                lcd.print("Przytrzymaj by");
+                lcd.setCursor(0, 1);
+                lcd.print("zobaczyc legende");
+                break;
+              }
+              else if(state != HOLD)
+              {
+                break;
+              }
+              showLegend();
               state = RELEASED;
-            }
-            break;
+              break;
 
-          case '*':
-            break; //no action
+            case '1':
+              addFingerprint();
+              state = RELEASED;
+              break;
 
-          case '#':
-            break; //no action
+            case '2':
+              lcd.clear();
+              lcd.print("Usuwanie palca!");
+              delay(1500);
+              deleteID();
+              state = RELEASED;
+              break;
 
-          default:
-            lcd.clear();
-            lcd.print("This button has");
-            lcd.setCursor(0, 1);
-            lcd.print("no action!");
-            delay(100);
-            break;
+            case '3':
+              emptyDatabase();
+              state = RELEASED;
+              break;
+
+            case '5':
+              if(state == PRESSED)
+              {
+                bool matched = matchFingerprint();
+                if(matched)
+                {
+                  openLock();
+                }
+                state = RELEASED;
+              }
+              break;
+
+            case '8':
+              changePassword();
+              break;
+            case '*':
+              break; //no action
+
+            case '#':
+              break; //no action
+
+            default:
+              lcd.clear();
+              lcd.print("This button has");
+              lcd.setCursor(0, 1);
+              lcd.print("no action!");
+              break;
+          }
         }
       }
     }
