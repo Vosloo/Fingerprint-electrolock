@@ -5,16 +5,17 @@
 #include <SoftwareSerial.h>
 #include <EEPROM.h>
 
+//LCD is at SDA, SCL (Could be A4 and A5); FINGERPRINT: 11 - green, 12 - white; RELAY is at 10; KEYBOARD: ROWS - 3, 4, 5, 6 and COLUMNS - 7, 8, 9 
+
 #define RELAY 10
 
-long PASSWORD;
-int PASSADDRESS = 0; 
+unsigned long PASSWORD;
+long PASSADDRESS = 0; 
 
 const byte ROWS = 4; 
 const byte COLS = 3; 
 
-char hexaKeys[ROWS][COLS] = 
-{
+char hexaKeys[ROWS][COLS] = {
   {'1', '2', '3'},
   {'4', '5', '6'},
   {'7', '8', '9'},
@@ -43,8 +44,6 @@ byte arrowDown[] = {
   B00100
 };
 
-const int pageCount = 4;
-
 byte rowPins[ROWS] = {3, 4, 5, 6}; 
 byte colPins[COLS] = {7, 8, 9}; 
 
@@ -58,13 +57,38 @@ long timeElapsed = -1;
 boolean passOk = false;
 
 String tmpString = "";
-boolean tmpFlag = false;
 
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
-SoftwareSerial mySerial(12, 13); //green, white
+SoftwareSerial mySerial(11, 12); //green, white
 
 Adafruit_Fingerprint finger = Adafruit_Fingerprint(&mySerial);
+
+void writeToEEPROM(int address, unsigned long value){
+	byte four = (value & 0xFF);
+	byte three = ((value >> 8) & 0xFF);
+	byte two = ((value >> 16) & 0xFF);
+	byte one = ((value >> 24) & 0xFF);
+	
+	EEPROM.update(address, four);
+	EEPROM.update(address + 1, three);
+	EEPROM.update(address + 2, two);
+	EEPROM.update(address + 3, one);
+}
+
+unsigned long readFromEEPROM(long address){
+  long four = EEPROM.read(address);
+  long three = EEPROM.read(address + 1);
+  long two = EEPROM.read(address + 2);
+  long one = EEPROM.read(address + 3);
+
+  if(one == 255 && two == 255 && three == 255 && four == 255)
+  {
+    return 255;
+  }
+
+  return ((four << 0) & 0xFF) + ((three << 8) & 0xFFFF) + ((two << 16) & 0xFFFFFF) + ((one << 24) & 0xFFFFFFFF);
+}
 
 void switchBacklight(){
   if(backlightOn)
@@ -329,6 +353,14 @@ bool searchFingerprint(){
   while (status != FINGERPRINT_OK) 
   {
     status = finger.getImage();
+
+    char keyPressed = customKeypad.getKey();
+    if(keyPressed == '0')
+    {
+      lcd.clear();
+      lcd.print("Przerwano!");
+      return false;
+    }
     
     switch (status) 
     {
@@ -357,7 +389,14 @@ bool searchFingerprint(){
   }
     
   status = finger.image2Tz();
-  if (status != FINGERPRINT_OK)
+  if(status == FINGERPRINT_PACKETRECIEVEERR)
+  {
+    lcd.clear();
+    lcd.print("Comm error!");
+    delay(4000);
+    return false;
+  }
+  else if (status != FINGERPRINT_OK)
   {
     return false;
   }
@@ -424,8 +463,8 @@ bool checkBoundaries(int number){
   }
 }
 
-int convertToIntLong(String number){
-  int numInt = number.toInt();
+unsigned long convertToIntLong(String number){
+  unsigned long numInt = number.toInt();
   return numInt;
 }
 
@@ -574,6 +613,9 @@ void deleteInDatabase(uint8_t ID){
 }
 
 void deleteID(){
+  lcd.clear();
+  lcd.print("Usuwanie palca!");
+  delay(1500);
   uint8_t ID = getID(true);
   if(ID == 255) // Error ID (aborted)
   {
@@ -584,6 +626,9 @@ void deleteID(){
 }
 
 void addFingerprint(){
+  lcd.clear();
+  lcd.print("Dodawanie palca!");
+  delay(1500);
   uint8_t ID = getID();
   if(ID == 255) // Error ID (aborted)
   {
@@ -639,7 +684,8 @@ void showLegend(){
   lcd.setCursor(0, 0);
 
   boolean exitLegend = false;
-  String functionLabels[] = {"kupa", "kupa1", "kupa2", "kupa3"};
+  String functionLabels[] = {"1-Dodaj odcisk", "2-Usun odcisk", "3-Usuwanie bazy", "5-Otwarcie zamka", "8-Zmiana hasla"}; //See if it works
+  int pageCount = sizeof(functionLabels) / sizeof(functionLabels[0]);
   int currentPage = 0;
   lcd.print(functionLabels[currentPage]);
   while(true)
@@ -684,7 +730,7 @@ void showLegend(){
 void switchDisplayOff(){
   timeElapsed = -1;
   displayedMsg = "";
-  tmpFlag = false;
+  passOk = false;
   digitalWrite(RELAY, HIGH);
   lcd.clear();
   switchBacklight();
@@ -697,14 +743,16 @@ void openLock(){
   delay(3000);
   digitalWrite(RELAY, HIGH);
   lcd.clear();
+  delay(10);
   lcd.print("Zamknieto zamek");
 }
 
-bool checkIfPassCorrect(long number){
+bool checkIfPassCorrect(unsigned long number){
   if(((String)number).length() != 8)
   {
     return false;
   }
+  Serial.println(PASSWORD);
   if(PASSWORD != number)
   {
     return false;
@@ -712,7 +760,7 @@ bool checkIfPassCorrect(long number){
   return true;
 }
 
-void verifyPassword(){
+bool verifyPassword(){
   String number = "";
   lcd.clear();
   lcd.print("Podaj aktualne");
@@ -726,7 +774,8 @@ void verifyPassword(){
     int numLength = number.length();
     if(keyPressed == '#') // Accepted ID
     {
-      long tempNumber = convertToIntLong(number);
+      unsigned long tempNumber = convertToIntLong(number);
+      Serial.println(tempNumber);
       if(tempNumber == 0) // Couldnt convert
       {
         number = "";
@@ -745,14 +794,15 @@ void verifyPassword(){
       {
         lcd.clear();
         lcd.print("Zweryfikowano!");
+        delay(500);
         passOk = true;
-        return;
+        return true;
       }
       else
       {
         lcd.clear();
         lcd.print("Bledne haslo!");
-        return;
+        return false;
       }
     }
     else if(keyPressed == '*' && numLength >= 1) // Delete one character
@@ -766,7 +816,7 @@ void verifyPassword(){
     {
       lcd.clear();
       lcd.print("Przerwano.");
-      return; // Max value for byte - error num as cannot be returned as ID;
+      return false; // Max value for byte - error num as cannot be returned as ID;
     }
     else if(number.length() != 8)
     {
@@ -776,12 +826,77 @@ void verifyPassword(){
   }
 }
 
-void changePassword(){ // TODO end pass changing;
-  verifyPassword();
+void changePassword(){
+  bool verified = verifyPassword();
 
-  if(passOk)
+  if(passOk && verified)
   {
-    ;
+    lcd.clear();
+    lcd.print("Podaj nowe");
+    lcd.setCursor(0, 1);
+    String passMessage = "haslo: ";
+    lcd.print(passMessage);
+    String number = "";
+
+    while (true)
+    {
+      char keyPressed = customKeypad.waitForKey();
+      int numLength = number.length();
+      if(keyPressed == '#') // Accepted ID
+      {
+        unsigned long tempNumber = convertToIntLong(number);
+        if(tempNumber == 0) // Couldnt convert
+        {
+          number = "";
+          clearLine(1);
+          lcd.setCursor(0, 1);
+          lcd.print("Not a number!");
+          delay(2500);
+          clearLine(1);
+          lcd.setCursor(0, 1);
+          lcd.print(passMessage);
+          continue;
+        }
+
+        if(number.length() != 8)
+        {
+          number = "";
+          clearLine(1);
+          lcd.setCursor(0, 1);
+          lcd.print("Dlugosc =/= 8");
+          delay(2500);
+          clearLine(1);
+          lcd.setCursor(0, 1);
+          lcd.print(passMessage);
+          continue;
+        }
+        writeToEEPROM(PASSADDRESS, tempNumber);
+        PASSWORD = tempNumber;
+        lcd.clear();
+        lcd.print("Zaktualizowano");
+        lcd.setCursor(0, 1);
+        lcd.print("haslo!");
+        return;
+      }
+      else if(keyPressed == '*' && numLength >= 1) // Delete one character
+      {
+        number.remove(numLength - 1);
+        clearLine(1);
+        lcd.setCursor(0, 1);
+        lcd.print(passMessage + number);
+      }
+      else if(keyPressed == '0' && number.length() == 0) // Exit 
+      {
+        lcd.clear();
+        lcd.print("Przerwano.");
+        return; // Max value for byte - error num as cannot be returned as ID;
+      }
+      else if(number.length() != 8)
+      {
+        number.concat(keyPressed);
+        lcd.print(keyPressed);
+      }
+    }
   }
 }
 
@@ -789,11 +904,13 @@ void setup(){
   Serial.begin(9600);
   finger.begin(57600);
 
-  PASSWORD = EEPROM.read(PASSADDRESS); // reads password from eeprom;
-  if(PASSWORD == 255)
+  PASSWORD = readFromEEPROM(PASSADDRESS); // reads password from eeprom;
+  // Serial.println(PASSWORD);
+  if(PASSWORD == 255) //nothing set yet
   {
     PASSWORD = 12345678; //default Password = 12345678
   }
+  // Serial.println(PASSWORD);
   
   lcd.init();
   lcd.createChar(0, arrowDown);
@@ -824,7 +941,7 @@ void setup(){
 
   customKeypad.setHoldTime(1000); // Sets the amount of milliseconds the user will have to hold a button until the HOLD state is triggered.
 }
-  
+
 void loop(){
   String msg = "";
   
@@ -879,20 +996,26 @@ void loop(){
               break;
 
             case '1':
-              addFingerprint();
+              if(!passOk)
+                verifyPassword();
+              if(passOk)
+                addFingerprint();
               state = RELEASED;
               break;
 
             case '2':
-              lcd.clear();
-              lcd.print("Usuwanie palca!");
-              delay(1500);
-              deleteID();
+              if(!passOk)
+                verifyPassword();
+              if(passOk)
+                deleteID();
               state = RELEASED;
               break;
 
             case '3':
-              emptyDatabase();
+              if(!passOk)
+                verifyPassword();
+              if(passOk)
+                emptyDatabase();
               state = RELEASED;
               break;
 
@@ -910,6 +1033,7 @@ void loop(){
 
             case '8':
               changePassword();
+              state = RELEASED;
               break;
             case '*':
               break; //no action
@@ -930,7 +1054,7 @@ void loop(){
     timeElapsed = millis(); // No action;
   }
 
-  if(!tmpFlag && timeElapsed != -1 && millis() - timeElapsed >= timeForDisplayToTurnOff) // Wait for 8 secs before turning screen off
+  if(timeElapsed != -1 && millis() - timeElapsed >= timeForDisplayToTurnOff) // Wait for 8 secs before turning screen off
   {
     switchDisplayOff();
   }
